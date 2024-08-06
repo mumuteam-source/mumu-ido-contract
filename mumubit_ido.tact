@@ -1,6 +1,6 @@
 import "@stdlib/deploy";
 import "./message.tact";
-import "./jetton.tact";
+// import "./jetton.tact";
 
 contract MumubitIdo with Deployable {
     // Empty init() function is present by default in all Tact contracts
@@ -69,16 +69,10 @@ contract MumubitIdo with Deployable {
     funds_withdrawn: Bool = false; 
     // reentrant lock
     non_reentrant_lock: Bool = false;
-
-    // project Info
-    // infoGet: ProjectInfoGet;
-    
-    // TODO: 
-    // jetton_root_init: InitOf;
-    // get fun get_jetton_root(): Address{}
-    // InitOf vs Address: Which one has lowest storage cost? 
     
     // init 
+    // In the contract, the corresponding jetton wallet and decimals
+    // must be set through separate functions rather than through the initialization function.
     init(investCoinAddress: Address,projectCoinAddress: Address){
         
         self.owner =  sender();        
@@ -167,14 +161,6 @@ contract MumubitIdo with Deployable {
             signature: payload.loadRef().beginParse()
         };
     }
-    // fun TestVerifySignature(userVipLevel: Int, timestamp: Int, sender: Address, signature: Slice): Bool {
-    //     let dataToSign = beginCell()
-    //         .storeUint(userVipLevel, 8)
-    //         .storeUint(timestamp, 32)
-    //         .storeAddress(sender)
-    //         .endCell();
-    //     return checkSignature(dataToSign.hash(), signature, self.publicKey);
-    // }
 
     // get the params of notification's payload
     // use to verify the signature
@@ -192,20 +178,19 @@ contract MumubitIdo with Deployable {
     // Jetton Notification refund Transfer
     // as the sign error 
     fun refundTransfer(to: Address, amount: Int, reason: String) {
-        // dump(to);
         // refund Jetton
         send(SendParameters{
             to: self.this_contract_investCoinWallet!!,
-            value: ton("0.05"),
-            mode: SendIgnoreErrors,
+            value: ton("0.1"),
+            mode: SendRemainingValue + SendIgnoreErrors,
             body: TokenTransfer{
                 query_id: 0,
                 amount: amount,
                 destination: to,
                 response_destination: myAddress(),
                 custom_payload: null,
-                forward_ton_amount: ton("0.01"),
-                forward_payload: emptySlice()
+                forward_ton_amount: ton("0.09"),
+                forward_payload: beginCell().storeUint(0, 1).endCell().beginParse()
             }.toCell()
         });
 
@@ -343,8 +328,6 @@ contract MumubitIdo with Deployable {
 
         // check the sender again
         require(context().sender == self.this_contract_investCoinWallet, "not from the correct jetton wallet");
-
-        // let userVipLevel: Int = 2;
         
         // decode payload
         let payloadData: PayloadData = self.decodePayload(ido.forward_payload);
@@ -360,16 +343,16 @@ contract MumubitIdo with Deployable {
         }
         // check timestamp
         // 
-        // if (now() < self.start_time || now() > self.protect_time) {
-        //     self.refundTransfer(ido.from, ido.amount, "IDO not active");
-        //     return;
-        // }
+        if (now() < self.start_time || now() > self.protect_time) {
+            self.refundTransfer(ido.from, ido.amount, "IDO not active");
+            return;
+        }
 
-        // // // 
-        // if (timestamp < self.start_time || timestamp > now()) {
-        //     self.refundTransfer(ido.from, ido.amount, "Invalid transaction timestamp");
-        //     return;
-        // }
+        //
+        if (timestamp < self.start_time || timestamp > now()) {
+            self.refundTransfer(ido.from, ido.amount, "Invalid transaction timestamp");
+            return;
+        }
 
         //  check vip level
         if (userVipLevel < 1 || userVipLevel > 3) {
@@ -474,7 +457,7 @@ contract MumubitIdo with Deployable {
                 response_destination: myAddress(),
                 custom_payload: null,
                 forward_ton_amount: ton("0.01"),
-                forward_payload: emptySlice()
+                forward_payload: beginCell().storeUint(0, 1).endCell().beginParse()
             }.toCell()
         });
 
@@ -548,7 +531,7 @@ contract MumubitIdo with Deployable {
                 response_destination: myAddress(),
                 custom_payload: null,
                 forward_ton_amount: ton("0.01"),
-                forward_payload: emptySlice()
+                forward_payload: beginCell().storeUint(0, 1).endCell().beginParse()
             }.toCell()
         });
 
@@ -614,7 +597,7 @@ contract MumubitIdo with Deployable {
                 response_destination: myAddress(),
                 custom_payload: null,
                 forward_ton_amount: ton("0.01"),
-                forward_payload: emptySlice()
+                forward_payload: beginCell().storeUint(0, 1).endCell().beginParse()
             }.toCell()
         });
 
