@@ -6,12 +6,6 @@ struct PayloadData {
     signature: Slice;
 }
 
-struct IdoData {
-    index: Int as uint64;
-    this_contract_jettonWallet: Address;
-    total_score: Int as coins;
-    parameter: Int as uint16;
-}
 struct IdoRecord {
     investCoinAddress: Address; //USDT or some stable coins 
     investorAddress: Address;   //Jetton Master Wallet Address
@@ -45,7 +39,6 @@ struct ProjectInfoGet {
     endSellTime: Int as uint32;
     protectTime: Int as uint32;
     claimTime: Int as uint32;
-    raiseStatus: Int as uint16;
     claimedAmount: Int as coins;
     investCoinWallet: Address;
     projectCoinWallet: Address;
@@ -58,7 +51,7 @@ message(0xf8a7ea5) TokenTransfer {
     query_id: Int as uint64;
     amount: Int as coins;
     destination: Address;
-    response_destination: Address;
+    response_destination: Address?;
     custom_payload: Cell?;
     forward_ton_amount: Int as coins;
     forward_payload: Slice as remaining; // Comment Text message when Transfer the jetton
@@ -68,7 +61,7 @@ message(0x178d4519) TokenTransferInternal {
     query_id: Int as uint64;
     amount: Int as coins;
     from: Address;
-    response_destination: Address;
+    response_destination: Address?;
     forward_ton_amount: Int as coins;
     forward_payload: Slice as remaining; // Comment Text message when Transfer the jetton
 }
@@ -92,10 +85,7 @@ message TransferEvent {
 }
 
 // ================================================================================ //
-message UserIdo {
-    from: Address;
-    amount: Int as coins;
-}
+
 message Refund {
     from: Address;
     amount: Int as coins;
@@ -104,14 +94,6 @@ message Refund {
 message Claim {
     from: Address;
     amount: Int as uint64;
-}
-message Redeem {
-    queryId: Int as uint64;
-    project_id: Int as uint16;
-}
-message GetWeighted {
-    // ===== on-chain fetch ===== //
-    applied_user_address: Address;
 }
 
 message SetProjectCoinAddress {
@@ -125,7 +107,6 @@ message SetInvestCoinAddress {
     this_contract_wallet:Address;
     decimals: Int as uint8;
 }
-
 
 message SetPublicKey{
     publicKey: Int;
