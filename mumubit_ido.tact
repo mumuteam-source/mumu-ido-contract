@@ -1,6 +1,5 @@
 import "@stdlib/deploy";
 import "./message.tact";
-// import "./jetton.tact";
 
 contract MumubitIdo with Deployable {
     // Empty init() function is present by default in all Tact contracts
@@ -17,15 +16,16 @@ contract MumubitIdo with Deployable {
     project_coin_address: Address;
     investCoinDecimals: Int as uint8 = 6;
     projectCoinDecimals: Int as uint8 = 9;
-    tonDecimals: Int as uint32 = 9;
 
+    // maximum number of participants.
+    const MAX_PARTICIPANTS: Int = 5000; 
     // IDO records
     index: Int as uint32 = 0;    
     ido_record: map<Address, IdoRecord>;
     ido_list: map<Int, IdoRecord>;
 
     // the price of project coin, 
-    // 500 should be devided by 10000;
+    // 500 should be divided by 1000;
     // and the decimals
     project_coin_price: Int as coins = 500;
     // target amount
@@ -42,8 +42,7 @@ contract MumubitIdo with Deployable {
     claim_time: Int as uint32 =1720935200;
     // end time
     end_time: Int as uint32 = 1720945200;
-    // the status of ido raise
-    raise_status: Int as uint16 = 0;
+
 
 
     // VIP 
@@ -67,8 +66,7 @@ contract MumubitIdo with Deployable {
     publicKey: Int = 11515758040791894312519273808582344479606047423343319073911177921016049419084;  
     // could be withdrawl
     funds_withdrawn: Bool = false; 
-    // reentrant lock
-    non_reentrant_lock: Bool = false;
+
     
     // init 
     // In the contract, the corresponding jetton wallet and decimals
@@ -78,13 +76,13 @@ contract MumubitIdo with Deployable {
         self.owner =  sender();        
 
         self.invest_coin_address = investCoinAddress; 
-        self.this_contract_investCoinWallet = investCoinAddress;
+        self.this_contract_investCoinWallet = null;
         // let myInit=  initOf JettonDefaultWallet(investCoinAddress,myAddress());
         // self.this_contract_investCoinWallet = contractAddress(myInit);
         // self.investCoinDecimals = 6; // ton usdt 6 decimals
     
         self.project_coin_address = projectCoinAddress;
-        self.this_contract_projectCoinWallet = projectCoinAddress;
+        self.this_contract_projectCoinWallet = null;
         // let initAddress = initOf JettonDefaultWallet(projectCoinAddress,myAddress());
         // self.this_contract_projectCoinWallet = contractAddress(initAddress);
         // self.projectCoinDecimals = 9; // jetton default 9 decimals
@@ -94,16 +92,6 @@ contract MumubitIdo with Deployable {
 
     // ***********************************/
     
-    // reentrant lock
-    fun lockContract() {
-        require(!self.non_reentrant_lock, "Reentrant call detected");
-        self.non_reentrant_lock = true;
-    }
-
-    // unlock the reentrant
-    fun unlockContract() {
-        self.non_reentrant_lock = false;
-    }
 
     // get the vip limit
     fun getVipLimit(vipLevel: Int): Int {
@@ -160,6 +148,18 @@ contract MumubitIdo with Deployable {
             timestamp: payload.loadUint(32),
             signature: payload.loadRef().beginParse()
         };
+    }
+
+    // Based on the official documentation, using fromSlice, 
+    // if there's a parsing error, it will return a null result. 
+    fun cautiousParse(payload: Slice): PayloadData? {
+        let data: PayloadData? = null;
+        try {
+            data = PayloadData.fromSlice(payload);
+        } catch (e) {
+            dump("Slice payload doesn't match PayloadData Struct!");
+        }
+        return data;
     }
 
     // get the params of notification's payload
@@ -251,7 +251,7 @@ contract MumubitIdo with Deployable {
     // ***********************************/
     // set project info as owner
     // as the price, target amount ,timestamps and so on 
-    // excludeed the jetton address and decimals
+    // excluded the jetton address and decimals
     receive(msg: SetProjectInfo) {
         require(sender() == self.owner, "Only owner can set project info");
 
@@ -272,14 +272,15 @@ contract MumubitIdo with Deployable {
         self.claim_time = msg.claimTime;
         self.end_time = msg.endSellTime;
 
-        self.raise_status = msg.raiseStatus;
-
     }
 
     // set invest coin address after ido started
     receive(msg: SetInvestCoinAddress){
         let ctx: Context = context();
+        // check the owner
         require(ctx.sender==self.owner,"Only Owner can set this parameter!");
+        // check the time
+        require(now() < self.start_time, "Cannot change invest coin address after IDO has started");
         self.invest_coin_address = msg.investCoinAddress;
         self.this_contract_investCoinWallet = msg.this_contract_wallet;
         self.investCoinDecimals = msg.decimals;
@@ -290,7 +291,10 @@ contract MumubitIdo with Deployable {
     // set project coin address after ido started
     receive(msg: SetProjectCoinAddress){
         let ctx: Context = context();
+        // check the owner
         require(ctx.sender==self.owner,"Only Owner can set this parameter!");
+        // check the time
+        require(now() < self.start_time, "Cannot change project coin address after IDO has started");
         self.project_coin_address = msg.projectCoinAddress;
         self.this_contract_projectCoinWallet = msg.this_contract_wallet;
         self.projectCoinDecimals = msg.decimals; 
@@ -307,6 +311,12 @@ contract MumubitIdo with Deployable {
     // set timestamps of start/end protect and claim
     receive(msg: SetIDOTimes) {
         require(sender() == self.owner, "Only owner can set times");
+        // check the time
+        require(now() < msg.startTime, "Start time must be in the future");
+        require(msg.startTime < msg.protectTime, "Protect time must be after start time");
+        require(msg.protectTime < msg.claimTime, "Claim time must be after protect time");
+        require(msg.claimTime < msg.endTime, "End time must be after claim time");
+
         self.start_time = msg.startTime;
         self.protect_time = msg.protectTime;
         self.claim_time = msg.claimTime;
@@ -329,11 +339,26 @@ contract MumubitIdo with Deployable {
         // check the sender again
         require(context().sender == self.this_contract_investCoinWallet, "not from the correct jetton wallet");
         
+        // Ensure the maximum number of participants is not exceeded
+        if(self.index > self.MAX_PARTICIPANTS){
+            dump("Max participants reached");
+            self.refundTransfer(ido.from, ido.amount, "Max participants reached");
+            return;
+        }
         // decode payload
-        let payloadData: PayloadData = self.decodePayload(ido.forward_payload);
-        let userVipLevel: Int = payloadData.vipLevel;
-        let timestamp: Int = payloadData.timestamp;
-        let signature: Slice = payloadData.signature;
+        // let payloadData: PayloadData = self.decodePayload(ido.forward_payload);
+
+        // if wrong paylaod stract,we return jetton to the sender
+        let payloadData: PayloadData? = self.cautiousParse(ido.forward_payload);
+        if (payloadData == null) {
+            dump("Invalid payload");
+            self.refundTransfer(ido.from, ido.amount, "Invalid payload");
+            return;
+        }
+
+        let userVipLevel: Int = payloadData!!.vipLevel;
+        let timestamp: Int = payloadData!!.timestamp;
+        let signature: Slice = payloadData!!.signature;
 
         // verify sign
         if (!self.verifySignature(userVipLevel, timestamp, ido.amount, ido.from, signature)) {
@@ -405,7 +430,7 @@ contract MumubitIdo with Deployable {
                 }
             );
             self.ido_list.set(self.index, self.ido_record.get(ido.from)!!);
-            self.index = (self.index + 1);
+            self.index += 1;
         }
 
         // update invest amount of current time
@@ -426,9 +451,7 @@ contract MumubitIdo with Deployable {
 
     // Refund 
     receive("Refund") {
-        // lock for reentrant
-        self.lockContract();
-        
+
         // time check
         require(now() > self.protect_time && now() < self.claim_time, "Refund is only allowed between protect time and claim time");
 
@@ -487,15 +510,11 @@ contract MumubitIdo with Deployable {
             idoTimestamp: now()
         }.toCell());
 
-        // unlock 
-        self.unlockContract();
     }
 
     // claim
     receive("Claim") {
-        // lock reentrant
-        self.lockContract();
-        
+
         // time check
         require(now() >= self.claim_time, "Claiming is not allowed before claim time");
 
@@ -516,8 +535,16 @@ contract MumubitIdo with Deployable {
         // let claimAmount: Int = (oldIdo.jettonIdoAmount * 1000) / self.project_coin_price;
         // calculate the 1000 factor of decimals diff between project_coin_price and invest coin price 
         let decimalsDiff: Int = self.projectCoinDecimals - self.investCoinDecimals;
-        let adjustedAmount: Int = oldIdo.jettonIdoAmount * pow(10, decimalsDiff);
-        let claimAmount: Int =  (adjustedAmount * 1000) / self.project_coin_price;
+        let claimAmount: Int = 0;
+        if (decimalsDiff >= 0) {
+            let adjustedAmount: Int = oldIdo.jettonIdoAmount * pow(10, decimalsDiff);
+            claimAmount = (adjustedAmount * 1000) / self.project_coin_price;
+        } else {
+            let adjustedPrice: Int = self.project_coin_price * pow(10, -decimalsDiff);
+            claimAmount = (oldIdo.jettonIdoAmount * 1000) / adjustedPrice;
+        }
+        // let adjustedAmount: Int = oldIdo.jettonIdoAmount * pow(10, decimalsDiff);
+        // let claimAmount: Int =  (adjustedAmount * 1000) / self.project_coin_price;
 
         // transfer project coin to invest user
         send(SendParameters{
@@ -561,8 +588,6 @@ contract MumubitIdo with Deployable {
             idoTimestamp: now()
         }.toCell());
 
-        // unlock 
-        self.unlockContract();
     }
 
     // with the remains to the project manager
@@ -633,7 +658,6 @@ contract MumubitIdo with Deployable {
             endSellTime: self.end_time,
             protectTime: self.protect_time,
             claimTime: self.claim_time,
-            raiseStatus: self.raise_status,
             claimedAmount: self.ido_claim_amount,
             vip1CurrentAmount: self.vip1PerCurrentAmount,
             vip2CurrentAmount: self.vip2PerCurrentAmount,
